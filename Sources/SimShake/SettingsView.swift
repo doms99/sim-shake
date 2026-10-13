@@ -1,9 +1,11 @@
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 struct SettingsView: View {
     @ObservedObject var store: CommandStore
     @ObservedObject var logs: RunLogStore
+    @ObservedObject var xcode: XcodeSettings
     @State private var selection: Command.ID?
     @State private var isConfirmingRestore = false
 
@@ -20,15 +22,18 @@ struct SettingsView: View {
             HStack {
                 Button("Restore Defaults…") { isConfirmingRestore = true }
                 Spacer()
+                XcodeMenu(xcode: xcode)
                 Stepper(
                     "Keep last \(logs.keepCount) logs per command",
                     value: $logs.keepCount,
                     in: RunLogStore.keepCountRange
                 )
+                .fixedSize()
             }
             .padding(12)
         }
-        .frame(minWidth: 600, idealWidth: 680, minHeight: 380, idealHeight: 440)
+        // Wide enough for the bottom bar with the Xcode menu.
+        .frame(minWidth: 700, idealWidth: 760, minHeight: 380, idealHeight: 440)
         .onAppear {
             if selection == nil { selection = store.commands.first?.id }
         }
@@ -107,6 +112,89 @@ struct SettingsView: View {
         guard let id = selection, let index = store.commands.firstIndex(where: { $0.id == id }) else { return }
         store.commands.remove(at: index)
         selection = store.commands.indices.contains(index) ? store.commands[index].id : store.commands.last?.id
+    }
+}
+
+/// Automatic, a discovered Xcode, or one picked with Choose…; a pin that's gone shows a warning.
+private struct XcodeMenu: View {
+    @ObservedObject var xcode: XcodeSettings
+
+    /// The pinned install when the pin is valid.
+    private var pinnedInstall: XcodeInstall? {
+        xcode.resolution.source == .pinned ? xcode.resolution.install : nil
+    }
+
+    private var automaticTitle: String { "Automatic — \(Self.name(of: xcode.automatic))" }
+
+    /// A pin that isn't in the discovered list, e.g. one that's gone or lives outside Applications.
+    private var unlistedPin: String? {
+        guard let path = xcode.pinnedPath else { return nil }
+        if let pinnedInstall, xcode.installs.contains(pinnedInstall) { return nil }
+        let name = URL(fileURLWithPath: path).lastPathComponent
+        return xcode.resolution.pinnedMissing ? "\(name) (missing)" : name
+    }
+
+    private var selectedTitle: String {
+        guard xcode.pinnedPath != nil else { return automaticTitle }
+        return unlistedPin ?? pinnedInstall?.displayName ?? automaticTitle
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if xcode.resolution.pinnedMissing, let path = xcode.pinnedPath {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(.orange)
+                    .help("Pinned Xcode not found at \(path); using \(Self.name(of: xcode.automatic))")
+            }
+            Menu {
+                // Toggles render as checkmarked items in a macOS menu.
+                Toggle(automaticTitle, isOn: selecting(nil, isSelected: xcode.pinnedPath == nil))
+                Divider()
+                ForEach(xcode.installs, id: \.self) { install in
+                    Toggle(install.displayName, isOn: selecting(install.appURL.path, isSelected: pinnedInstall == install))
+                }
+                if let unlistedPin, let path = xcode.pinnedPath {
+                    Toggle(unlistedPin, isOn: selecting(path, isSelected: true))
+                }
+                Divider()
+                Button("Choose…", action: choose)
+            } label: {
+                Text("Xcode: \(selectedTitle)")
+            }
+            .fixedSize()
+            .help(xcode.resolution.developerDirectory?.path ?? "No Xcode found")
+        }
+        .onAppear { xcode.reload() }
+        // Picks up Xcodes installed or deleted while the window was in the background.
+        .onReceive(NotificationCenter.default.publisher(for: NSWindow.didBecomeKeyNotification)) { _ in xcode.reload() }
+    }
+
+    /// Choosing an item pins `path` (or Automatic for `nil`), even if it's already checked.
+    private func selecting(_ path: String?, isSelected: Bool) -> Binding<Bool> {
+        Binding(get: { isSelected }, set: { _ in xcode.pinnedPath = path })
+    }
+
+    private func choose() {
+        let panel = NSOpenPanel()
+        panel.canChooseFiles = true
+        panel.canChooseDirectories = false
+        panel.allowsMultipleSelection = false
+        panel.allowedContentTypes = [.application]
+        panel.directoryURL = URL(fileURLWithPath: "/Applications", isDirectory: true)
+        panel.message = "Choose an Xcode"
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        guard let install = XcodeInstall.load(appURL: url) else {
+            let alert = NSAlert()
+            alert.messageText = "That app isn't an Xcode with simctl."
+            alert.runModal()
+            return
+        }
+        xcode.pinnedPath = install.appURL.path
+    }
+
+    /// `Xcode 27.1 RC`, or the developer directory when it isn't inside an Xcode app.
+    private static func name(of resolution: XcodeResolution) -> String {
+        resolution.install?.displayName ?? resolution.developerDirectory?.path ?? "none found"
     }
 }
 

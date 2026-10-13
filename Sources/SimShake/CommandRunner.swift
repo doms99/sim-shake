@@ -55,6 +55,9 @@ enum CommandRunner {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: loginShell)
         process.arguments = ["-l", "-c", run.script]
+        // Resolved here, off the main thread, so `xcrun` in commands uses the same Xcode as the menu.
+        // A `DEVELOPER_DIR` exported in the login profile still wins.
+        process.environment = XcodeSelector.environment(for: XcodeSelector.current().developerDirectory)
         process.standardInput = FileHandle.nullDevice
         let pipe = Pipe()
         process.standardOutput = pipe

@@ -18,11 +18,13 @@ struct SimctlError: LocalizedError {
 }
 
 extension Simulator {
-    /// Runs `xcrun simctl list devices -j` synchronously and returns the booted devices.
-    static func listBooted() throws -> [Simulator] {
+    /// Runs `xcrun simctl list devices -j` synchronously with `developerDirectory` as `DEVELOPER_DIR`
+    /// and returns the booted devices.
+    static func listBooted(developerDirectory: URL?) throws -> [Simulator] {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/xcrun")
         process.arguments = ["simctl", "list", "devices", "-j"]
+        process.environment = XcodeSelector.environment(for: developerDirectory)
         let output = Pipe()
         process.standardOutput = output
         process.standardError = FileHandle.nullDevice

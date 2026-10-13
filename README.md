@@ -6,7 +6,8 @@ imports a photo or video you pick into a booted simulator's Photos library.
 
 ## Build and install
 
-Requires Xcode (for `xcrun simctl`) and Swift 6.
+Requires Swift 6, and Xcode to run simulator commands. SimShake finds Xcode itself, so
+`xcode-select` can stay pointed at the Command Line Tools (see [Xcode](#xcode)).
 
 ```sh
 ./build.sh
@@ -64,6 +65,31 @@ Commands without `{udid}` run directly when clicked. Success is silent; if a com
 non-zero status, a notification shows the end of its output.
 
 Commands SimShake started are stopped when it quits.
+
+## Xcode
+
+SimShake picks the Xcode to use each time it lists simulators or runs a command, and passes it as
+`DEVELOPER_DIR`, so `xcrun simctl` works without `sudo xcode-select -s`. By default (**Automatic**)
+it uses, in order:
+
+1. the `xcode-select -p` directory, if it contains `usr/bin/simctl` (the Command Line Tools don't);
+2. otherwise the best Xcode at the top level of `/Applications` or `~/Applications`: stable releases
+   before pre-releases, then the highest version, then the highest build.
+
+With no Xcode found, simulator commands are greyed out with a tooltip saying so.
+
+The **Xcode** pop-up at the bottom of **Settings…** shows what Automatic resolves to, lists the
+Xcodes it found, and has **Choose…** to pin any other Xcode app. A pinned Xcode is used until you
+switch back to Automatic. If it's deleted or moved, SimShake falls back to Automatic and the pop-up
+shows a warning. **Restore Defaults** doesn't change the choice.
+
+`DEVELOPER_DIR` also applies to commands, so `xcrun` in them uses the same Xcode. One exported in
+`~/.zprofile` wins, since the login shell sets it after SimShake does.
+
+Xcode bundles don't mark pre-releases, so they're recognised by the app's name: `beta` makes it a
+beta, and `Release Candidate` or a separate `RC` a release candidate (the names the Xcodes app
+uses, such as `Xcode-27.1.0-Release.Candidate.app`). A pre-release renamed to `Xcode.app` counts as
+stable.
 
 ## Logs
 

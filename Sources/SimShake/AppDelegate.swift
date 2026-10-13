@@ -107,8 +107,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// listing) leaves the item disabled, since it has no action.
     private func configureSimulatorItem(_ item: NSMenuItem, for command: Command) {
         switch bootedSimulators ?? .listed([]) {
-        case .failed:
-            item.toolTip = "Couldn't list simulators"
+        case .failed(let reason):
+            item.toolTip = reason
         case .listed(let simulators) where simulators.isEmpty:
             item.toolTip = "No booted simulators"
         case .listed(let simulators) where simulators.count == 1:
@@ -144,12 +144,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// Resolves the Xcode on every listing, so a changed choice shows up the next time the menu opens.
     private nonisolated static func listBootedSimulators() -> BootedSimulators {
+        guard let developerDirectory = XcodeSelector.current().developerDirectory else {
+            return .failed("No Xcode found. Install Xcode or choose one in Settings.")
+        }
         do {
-            return .listed(try Simulator.listBooted())
+            return .listed(try Simulator.listBooted(developerDirectory: developerDirectory))
         } catch {
             NSLog("SimShake: couldn't list simulators: %@", error.localizedDescription)
-            return .failed
+            return .failed("Couldn't list simulators")
         }
     }
 
@@ -197,10 +201,10 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func makeSettingsWindow() -> NSWindow {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(store: store, logs: .shared)))
+        let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(store: store, logs: .shared, xcode: .shared)))
         window.title = "SimShake Settings"
         window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 680, height: 440))
+        window.setContentSize(NSSize(width: 760, height: 440))
         window.isReleasedWhenClosed = false
         window.center()
         return window
@@ -278,7 +282,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
 private enum BootedSimulators: Equatable {
     case listed([Simulator])
-    case failed
+    /// Carries the disabled item's tooltip.
+    case failed(String)
 }
 
 private struct SimulatorRun {
