@@ -174,15 +174,12 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSMenuDelegate {
             CommandRunner.run(command, on: simulator)
             return
         }
-        // Wait for the menu to close (it tracks in another run loop mode). This is a run loop callout
-        // rather than a GCD block on purpose: running the modal dialog inside a main-queue block stalls
-        // the main queue until it closes, and the dialog then opens without its first field focused.
-        RunLoop.main.perform(inModes: [.default]) {
-            MainActor.assumeIsolated {
-                guard let values = ParameterPrompt.ask(for: command, on: simulator) else { return }
-                CommandRunner.run(command, on: simulator, values: values)
-            }
-        }
+        // Menu actions run after the menu has closed, while the click is being handled, which is where
+        // a modal dialog belongs. Deferring it to a run loop block or a main-queue block instead nests
+        // the dialog inside AppKit's event fetch: the window server then treats SimShake as unresponsive
+        // (spinning cursor, delayed clicks and keystrokes) for as long as the dialog is open.
+        guard let values = ParameterPrompt.ask(for: command, on: simulator) else { return }
+        CommandRunner.run(command, on: simulator, values: values)
     }
 
     // MARK: - Settings
