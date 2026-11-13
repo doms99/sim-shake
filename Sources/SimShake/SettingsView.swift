@@ -44,7 +44,7 @@ struct SettingsView: View {
             }
             Button("Cancel", role: .cancel) {}
         } message: {
-            Text("This replaces all commands with the default Shake command.")
+            Text("This replaces all commands with the default commands.")
         }
     }
 

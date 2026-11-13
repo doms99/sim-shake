@@ -1,8 +1,13 @@
 # SimShake
 
-A macOS menu bar app for running commands against iOS simulators. Out of the box it has two
-commands: **Shake**, which sends the shake gesture to a booted simulator, and **Add Media**, which
-imports a photo or video you pick into a booted simulator's Photos library.
+A macOS menu bar app for running commands against iOS simulators. Out of the box it has four
+commands:
+
+- **Shake** sends the shake gesture to a booted simulator.
+- **Deep Link** opens a URL you enter in a booted simulator.
+- **Push Notification** sends an `.apns` or `.json` payload file you pick to the app with the bundle
+  ID you enter.
+- **Add Media** imports a photo or video you pick into a booted simulator's Photos library.
 
 ## Build and install
 
@@ -24,9 +29,10 @@ Run the tests with `swift test`.
 ## Commands
 
 Open **Settings…** from the menu bar icon to add, edit, reorder, or delete commands and pick their
-icons. **Restore Defaults** replaces all commands with the default Shake and Add Media commands.
-Installs from before Add Media existed get it added to the end of their list once; delete it and it
-stays deleted.
+icons. **Restore Defaults** replaces all commands with the four default commands. Installs from
+before Deep Link, Push Notification, or Add Media existed get each one added to the end of their
+list once, unless the list already has a command with the same name (ignoring case) or the same
+command text; delete one and it stays deleted.
 
 Commands run through your login shell (`$SHELL -l -c "<command>"`), so `PATH` from `~/.zprofile`
 (e.g. Homebrew) applies. `~/.zshrc` is not loaded; tools set up only there (such as nvm) need

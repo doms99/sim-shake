@@ -72,6 +72,13 @@ struct Command: Codable, Identifiable, Hashable {
             && !command.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
     }
 
+    /// Same name ignoring case, or same command text, both trimmed.
+    func isSameCommand(as other: Command) -> Bool {
+        func trimmed(_ value: String) -> String { value.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return trimmed(name).caseInsensitiveCompare(trimmed(other.name)) == .orderedSame
+            || trimmed(command) == trimmed(other.command)
+    }
+
     /// Fills `{udid}` and each `{{name}}` and `{name:file}` (as one shell-quoted argument) in a
     /// single pass, so inserted text is never substituted again.
     func resolved(udid: String?, values: [String: String] = [:]) -> String {
@@ -141,9 +148,12 @@ struct Command: Codable, Identifiable, Hashable {
 @MainActor
 final class CommandStore: ObservableObject {
     private static let key = "commands"
-    /// Set once Add Media has been offered, so deleting it keeps it deleted.
-    private static let didAddMediaKey = "didAddMediaCommand"
+    /// Names of the `addedDefaults` already offered to a saved list, so deleting one keeps it deleted.
+    private static let offeredDefaultsKey = "offeredDefaultCommands"
+    /// Set by builds that only offered Add Media; read once and folded into `offeredDefaultsKey`.
+    private static let legacyDidAddMediaKey = "didAddMediaCommand"
 
+    /// A fresh id for each command on every access.
     nonisolated static var defaultCommands: [Command] {
         [
             Command(
@@ -151,17 +161,28 @@ final class CommandStore: ObservableObject {
                 command: "xcrun simctl spawn {udid} notifyutil -p com.apple.UIKit.SimulatorShake",
                 symbol: "iphone.gen3.radiowaves.left.and.right"
             ),
-            addMediaCommand,
+            Command(
+                name: "Deep Link",
+                command: "xcrun simctl openurl {udid} {{URL}}",
+                symbol: "link"
+            ),
+            Command(
+                name: "Push Notification",
+                command: "xcrun simctl push {udid} {{Bundle ID}} {payload:file:apns,json}",
+                symbol: "bell.badge"
+            ),
+            Command(
+                name: "Add Media",
+                command: "xcrun simctl addmedia {udid} {media:file:png,jpg,jpeg,heic,gif,mp4,mov,m4v}",
+                symbol: "photo.on.rectangle"
+            ),
         ]
     }
 
-    /// A fresh id on every access, like the rest of `defaultCommands`.
-    private nonisolated static var addMediaCommand: Command {
-        Command(
-            name: "Add Media",
-            command: "xcrun simctl addmedia {udid} {media:file:png,jpg,jpeg,heic,gif,mp4,mov,m4v}",
-            symbol: "photo.on.rectangle"
-        )
+    /// Defaults added after the first release: lists saved before they existed get each one
+    /// appended once.
+    private nonisolated static var addedDefaults: [Command] {
+        defaultCommands.filter { $0.name != "Shake" }
     }
 
     /// Removing a command (including through `restoreDefaults()`) deletes its logs.
@@ -184,15 +205,24 @@ final class CommandStore: ObservableObject {
         if let data = defaults.data(forKey: Self.key),
            let saved = try? JSONDecoder().decode([Command].self, from: data) {
             commands = saved
-            // Commands saved before Add Media existed get it appended once.
-            if !defaults.bool(forKey: Self.didAddMediaKey) {
-                commands.append(Self.addMediaCommand)
+            var offered = Set(defaults.stringArray(forKey: Self.offeredDefaultsKey) ?? [])
+            if defaults.bool(forKey: Self.legacyDidAddMediaKey) {
+                offered.insert("Add Media")
+            }
+            // A list that already has the command under the same name or command text isn't
+            // given a duplicate.
+            let missing = Self.addedDefaults.filter { added in
+                !offered.contains(added.name) && !saved.contains { $0.isSameCommand(as: added) }
+            }
+            if !missing.isEmpty {
+                commands.append(contentsOf: missing)
                 save() // `didSet` doesn't run during init.
             }
         } else {
             commands = Self.defaultCommands
         }
-        defaults.set(true, forKey: Self.didAddMediaKey)
+        defaults.set(Self.addedDefaults.map(\.name), forKey: Self.offeredDefaultsKey)
+        defaults.removeObject(forKey: Self.legacyDidAddMediaKey)
     }
 
     func restoreDefaults() {

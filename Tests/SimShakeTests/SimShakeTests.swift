@@ -246,10 +246,48 @@ final class SimShakeTests: XCTestCase {
             return XCTFail("media should be a file parameter")
         }
     }
+
+    func testDefaultCommandsOrder() {
+        XCTAssertEqual(CommandStore.defaultCommands.map(\.name), ["Shake", "Deep Link", "Push Notification", "Add Media"])
+    }
+
+    func testDefaultCommandsContainDeepLink() throws {
+        let deepLink = try XCTUnwrap(CommandStore.defaultCommands.first { $0.name == "Deep Link" })
+        XCTAssertEqual(deepLink.command, "xcrun simctl openurl {udid} {{URL}}")
+        XCTAssertEqual(deepLink.symbol, "link")
+        XCTAssertTrue(deepLink.usesSimulator)
+        XCTAssertEqual(deepLink.parameters, [.init(name: "URL", kind: .text)])
+        XCTAssertEqual(
+            deepLink.resolved(udid: "ABC", values: ["URL": "myapp://path?a=1&b=2"]),
+            "xcrun simctl openurl ABC 'myapp://path?a=1&b=2'"
+        )
+    }
+
+    func testDefaultCommandsContainPushNotification() throws {
+        let push = try XCTUnwrap(CommandStore.defaultCommands.first { $0.name == "Push Notification" })
+        XCTAssertEqual(push.command, "xcrun simctl push {udid} {{Bundle ID}} {payload:file:apns,json}")
+        XCTAssertEqual(push.symbol, "bell.badge")
+        XCTAssertTrue(push.usesSimulator)
+        XCTAssertEqual(push.parameters, [
+            .init(name: "Bundle ID", kind: .text),
+            .init(name: "payload", kind: .file(extensions: ["apns", "json"])),
+        ])
+        XCTAssertEqual(
+            push.resolved(udid: "ABC", values: ["Bundle ID": "com.example.app", "payload": "/tmp/push.apns"]),
+            "xcrun simctl push ABC 'com.example.app' '/tmp/push.apns'"
+        )
+    }
+
+    func testIsSameCommand() {
+        let command = Command(name: "Deep Link", command: "xcrun simctl openurl {udid} {{URL}}", symbol: "link")
+        XCTAssertTrue(command.isSameCommand(as: Command(name: " deep link ", command: "other", symbol: "x")))
+        XCTAssertTrue(command.isSameCommand(as: Command(name: "Open", command: "xcrun simctl openurl {udid} {{URL}}\n", symbol: "x")))
+        XCTAssertFalse(command.isSameCommand(as: Command(name: "Open", command: "xcrun simctl openurl {udid} {{Link}}", symbol: "x")))
+    }
 }
 
-/// Adding Add Media to command lists saved before it existed.
-final class AddMediaMigrationTests: XCTestCase {
+/// Appending defaults added after the first release to command lists saved before they existed.
+final class AddedDefaultsMigrationTests: XCTestCase {
     private var root: URL!
     private var directory: LogDirectory!
     private var suiteName: String!
@@ -269,38 +307,67 @@ final class AddMediaMigrationTests: XCTestCase {
         try? FileManager.default.removeItem(at: root)
     }
 
+    private let echo = Command(name: "Echo", command: "echo hi", symbol: "terminal")
+
+    private func save(_ commands: [Command]) throws {
+        defaults.set(try JSONEncoder().encode(commands), forKey: "commands")
+    }
+
     @MainActor
-    func testSavedCommandsGetAddMediaOnce() throws {
-        let saved = [Command(name: "Echo", command: "echo hi", symbol: "terminal")]
-        defaults.set(try JSONEncoder().encode(saved), forKey: "commands")
+    func testSavedCommandsGetAddedDefaultsOnce() throws {
+        try save([echo])
 
         let store = makeStore()
-        XCTAssertEqual(store.commands.map(\.name), ["Echo", "Add Media"])
-        XCTAssertEqual(store.commands[0], saved[0])
+        XCTAssertEqual(store.commands.map(\.name), ["Echo", "Deep Link", "Push Notification", "Add Media"])
+        XCTAssertEqual(store.commands[0], echo)
 
         let reopened = makeStore()
-        XCTAssertEqual(reopened.commands.map(\.name), ["Echo", "Add Media"])
+        XCTAssertEqual(reopened.commands.map(\.name), store.commands.map(\.name))
         XCTAssertEqual(reopened.commands.map(\.id), store.commands.map(\.id))
     }
 
     @MainActor
-    func testDeletedAddMediaIsNotAddedBack() throws {
-        let saved = [Command(name: "Echo", command: "echo hi", symbol: "terminal")]
-        defaults.set(try JSONEncoder().encode(saved), forKey: "commands")
+    func testDeletedAddedDefaultsAreNotAddedBack() throws {
+        try save([echo])
 
         let store = makeStore()
-        store.commands.removeAll { $0.name == "Add Media" }
+        store.commands.removeAll { $0.name == "Deep Link" || $0.name == "Add Media" }
 
-        XCTAssertEqual(makeStore().commands.map(\.name), ["Echo"])
+        XCTAssertEqual(makeStore().commands.map(\.name), ["Echo", "Push Notification"])
     }
 
     @MainActor
-    func testFreshInstallHasAddMediaOnce() {
+    func testListThatAlreadyOfferedAddMediaGetsOnlyTheNewDefaults() throws {
+        try save([echo])
+        defaults.set(true, forKey: "didAddMediaCommand")
+
+        XCTAssertEqual(makeStore().commands.map(\.name), ["Echo", "Deep Link", "Push Notification"])
+        XCTAssertNil(defaults.object(forKey: "didAddMediaCommand"))
+        XCTAssertEqual(makeStore().commands.map(\.name), ["Echo", "Deep Link", "Push Notification"])
+    }
+
+    @MainActor
+    func testExistingCommandsWithSameNameOrCommandAreNotDuplicated() throws {
+        let ownDeepLink = Command(name: "deep link", command: "xcrun simctl openurl {udid} {{Link}}", symbol: "terminal")
+        let ownPush = Command(name: "Send Push", command: "xcrun simctl push {udid} {{Bundle ID}} {payload:file:apns,json}", symbol: "bell")
+        try save([echo, ownDeepLink, ownPush])
+
         let store = makeStore()
-        XCTAssertEqual(store.commands.map(\.name), ["Shake", "Add Media"])
+        XCTAssertEqual(store.commands, [echo, ownDeepLink, ownPush, store.commands[3]])
+        XCTAssertEqual(store.commands.map(\.name), ["Echo", "deep link", "Send Push", "Add Media"])
+
+        // Renaming or deleting them later doesn't bring the defaults in either.
+        store.commands.removeAll { $0.id == ownDeepLink.id || $0.id == ownPush.id }
+        XCTAssertEqual(makeStore().commands.map(\.name), ["Echo", "Add Media"])
+    }
+
+    @MainActor
+    func testFreshInstallHasEachDefaultOnce() {
+        let store = makeStore()
+        XCTAssertEqual(store.commands.map(\.name), ["Shake", "Deep Link", "Push Notification", "Add Media"])
 
         store.commands[0].name = "Shake It" // Saves the list.
-        XCTAssertEqual(makeStore().commands.map(\.name), ["Shake It", "Add Media"])
+        XCTAssertEqual(makeStore().commands.map(\.name), ["Shake It", "Deep Link", "Push Notification", "Add Media"])
     }
 
     @MainActor
