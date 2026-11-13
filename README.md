@@ -9,6 +9,10 @@
 
 <p align="center">A macOS menu bar app for running commands against iOS simulators.</p>
 
+<p align="center">
+  <img src="Support/Screenshots/menu.png" width="556" alt="SimShake menu with the Shake submenu listing two booted simulators">
+</p>
+
 It ships with four default commands:
 
 | Command | What it does |
@@ -37,6 +41,10 @@ items; manage this in **System Settings → General → Login Items**.
 
 Open **Settings…** from the menu bar icon to add, edit, reorder, or delete commands and pick their
 icons. **Restore Defaults** replaces all commands with the four defaults.
+
+<p align="center">
+  <img src="Support/Screenshots/settings.png" width="700" alt="SimShake Settings window editing the Shake command">
+</p>
 
 <details>
 <summary>Upgrading from an older install</summary>
